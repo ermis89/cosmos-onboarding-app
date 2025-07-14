@@ -30,7 +30,8 @@ def generate_schedule(df, role, hire_date,
     # Ensure hire_date is full datetime
     hire_date = datetime.combine(hire_date, datetime.min.time())
 
-    rdvs = df[df["Role"] == role].reset_index(drop=True)
+    rdvs = df[df["Role"].str.strip() == role.strip()].reset_index(drop=True)
+
     if rdvs.empty:
         return pd.DataFrame()
 
