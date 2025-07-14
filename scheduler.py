@@ -1,126 +1,149 @@
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 
-# ── helper to build daily config ───────────────────────────────────
+# ── day template ────────────────────────────────────────────────
 def day_bounds(day_idx: int):
-    if day_idx == 0:                               # Day 1
-        start = datetime.strptime("10:00", "%H:%M")
-        end   = datetime.strptime("18:00", "%H:%M")
+    """Return work-day start, end, and break windows for a 0-based day index."""
+    if day_idx == 0:                                   # Day-1 template
+        start = time(10, 0)
+        end   = time(18, 0)
         breaks = [
-            (datetime.strptime("11:30", "%H:%M"), datetime.strptime("12:00", "%H:%M")),
-            (datetime.strptime("13:00", "%H:%M"), datetime.strptime("14:00", "%H:%M")),
-            (datetime.strptime("15:30", "%H:%M"), datetime.strptime("16:00", "%H:%M")),
+            (time(11, 30), time(12,  0)),
+            (time(13,  0), time(14,  0)),
+            (time(15, 30), time(16,  0)),
         ]
-    else:                                          # Other days
-        start = datetime.strptime("09:00", "%H:%M")
-        end   = datetime.strptime("17:00", "%H:%M")
+    else:                                              # Day-2+
+        start = time( 9, 0)
+        end   = time(17, 0)
         breaks = [
-            (datetime.strptime("10:30", "%H:%M"), datetime.strptime("11:00", "%H:%M")),
-            (datetime.strptime("13:00", "%H:%M"), datetime.strptime("14:00", "%H:%M")),
-            (datetime.strptime("15:30", "%H:%M"), datetime.strptime("16:00", "%H:%M")),
+            (time(10, 30), time(11,  0)),
+            (time(13,  0), time(14,  0)),
+            (time(15, 30), time(16,  0)),
         ]
     return start, end, breaks
 
-# ── main generator ────────────────────────────────────────────────
-def generate_schedule(df, role, hire_date,
-                      newcom_name, newcom_email,
-                      mgr1_name, mgr1_email,
-                      mgr2_name="", mgr2_email="") -> pd.DataFrame:
 
-    # Ensure hire_date is full datetime
-    hire_date = datetime.combine(hire_date, datetime.min.time())
+# ── public API ──────────────────────────────────────────────────
+def generate_schedule(
+        df_template: pd.DataFrame,
+        role: str,
+        hire_date,                                    # datetime.date or datetime
+        newcomer_name: str,
+        newcomer_email: str,
+        mgr1_name: str, mgr1_email: str,
+        mgr2_name: str = "", mgr2_email: str = ""
+) -> pd.DataFrame:
+    """
+    Build full schedule for the given role & hire date.
+    Returns a DataFrame with the 20 required columns.
+    """
 
-    rdvs = df[df["Role"].str.strip() == role.strip()].reset_index(drop=True)
+    # ensure hire_date is a datetime.date
+    if isinstance(hire_date, datetime):
+        hire_date = hire_date.date()
+
+    # filter & clean template rows
+    rdvs = (df_template[df_template["Role"].str.strip() == role.strip()]
+            .sort_values("Order")
+            .reset_index(drop=True))
 
     if rdvs.empty:
-        return pd.DataFrame()
+        return pd.DataFrame()              # nothing to schedule
 
-    out = []
+    rows = []
     day_idx = 0
-    rdv_cursor = 0
+    rdv_idx = 0
 
-    while rdv_cursor < len(rdvs):
-        day_start_t, day_end_t, breaks = day_bounds(day_idx)
+    while rdv_idx < len(rdvs):
+
+        # skip weekends
         day_date = hire_date + timedelta(days=day_idx)
-        current_dt = datetime.combine(day_date, day_start_t.time())
+        while day_date.weekday() >= 5:      # 5,6 = Sat, Sun
+            day_idx += 1
+            day_date = hire_date + timedelta(days=day_idx)
 
-        for brk_start_t, brk_end_t in breaks + [(day_end_t, day_end_t)]:
-            brk_start = datetime.combine(day_date, brk_start_t.time())
-            brk_end   = datetime.combine(day_date, brk_end_t.time())
+        # build day blocks
+        day_start, day_end, breaks = day_bounds(day_idx)
+        blocks = []
+        cursor = datetime.combine(day_date, day_start)
+        for bs, be in breaks + [(day_end, day_end)]:   # final virtual block
+            blocks.append((cursor, datetime.combine(day_date, bs)))
+            cursor = datetime.combine(day_date, be)
 
-            while rdv_cursor < len(rdvs):
-                rdv = rdvs.loc[rdv_cursor]
-                dur = int(rdv["Duration"])
-                rdv_end = current_dt + timedelta(minutes=dur)
+        # fill blocks
+        for block_start, block_end in blocks:
+            cursor_dt = block_start
 
-                if rdv_end <= brk_start:
-                    out.append(make_row(rdv, newcom_name, newcom_email,
-                                        mgr1_name, mgr1_email,
-                                        mgr2_name, mgr2_email,
-                                        current_dt, rdv_end, day_date))
-                    current_dt = rdv_end
-                    rdv_cursor += 1
+            while rdv_idx < len(rdvs):
+                rdv = rdvs.loc[rdv_idx]
+                dur_min = int(rdv["Duration"])
+                rdv_end = cursor_dt + timedelta(minutes=dur_min)
+
+                # fits entirely
+                if rdv_end <= block_end:
+                    rows.append(make_row(
+                        rdv, newcomer_name, newcomer_email,
+                        mgr1_name, mgr1_email, mgr2_name, mgr2_email,
+                        cursor_dt, rdv_end, day_date
+                    ))
+                    cursor_dt = rdv_end
+                    rdv_idx += 1
                 else:
-                    break
+                    # partial fits? split & continue next slot
+                    remaining = int((block_end - cursor_dt).total_seconds() // 60)
+                    if remaining > 0:
+                        rows.append(make_row(
+                            rdv, newcomer_name, newcomer_email,
+                            mgr1_name, mgr1_email, mgr2_name, mgr2_email,
+                            cursor_dt, block_end, day_date,
+                            suffix=" (cont.)", custom_dur=remaining
+                        ))
+                        rdvs.at[rdv_idx, "Duration"] = dur_min - remaining
+                    break  # move to next block
 
-            if brk_end_t != day_end_t:
-                out.append(make_break_row(brk_start, brk_end, day_date,
-                           "Break (Lunch)" if (brk_end - brk_start).seconds >= 3500
-                           else "Break (Short)",
-                           newcom_email, newcom_name))
-                current_dt = brk_end
+        day_idx += 1    # next calendar day
 
-        day_idx += 1
+    return pd.DataFrame(rows, columns=OUTPUT_COLS)
 
-    return pd.DataFrame(out)
 
-# ── helpers to build row dicts ────────────────────────────────────
-def make_row(r, new_name, new_email,
-             m1_name, m1_email, m2_name, m2_email,
-             start_dt, end_dt, day_date):
+# ── helpers ─────────────────────────────────────────────────────
+OUTPUT_COLS = [
+    "Newcomer Email", "Newcomer Name", "Role Group",
+    "RDV Title", "RDV Description",
+    "Contact Person1 Email", "Contact Person1 Name",
+    "Contact Person2 Email", "Contact Person2 Name",
+    "RDV Date", "Start Time", "End Time", "Duration",
+    "Location", "Manager1 Email", "Manager1 Name",
+    "Manager2 Email", "Manager2 Name",
+    "Status", "Hired Date"
+]
+
+
+def make_row(
+        rdv, new_name, new_email,
+        m1_name, m1_email, m2_name, m2_email,
+        start_dt: datetime, end_dt: datetime, day_date,
+        suffix: str = "", custom_dur: int | None = None):
+    """Return a single schedule row dictionary."""
     return {
         "Newcomer Email": new_email,
         "Newcomer Name":  new_name,
-        "Role": r["Role"],
-        "RDV":  r["RDV"],
-        "Short RDV Description": r["Short RDV Description"],
-        "Contact Person1 Email": r.get("Contact Person1 Email", ""),
-        "Contact Person1 Name":  r.get("Contact Person1 Name", ""),
-        "Contact Person2 Email": r.get("Contact Person2 Email", ""),
-        "Contact Person2 Name":  r.get("Contact Person2 Name", ""),
+        "Role Group":     rdv["Role"],
+        "RDV Title":      f"{rdv['RDV']}{suffix}",
+        "RDV Description": rdv["Short RDV Description"],
+        "Contact Person1 Email": rdv.get("Contact Person1 Email", ""),
+        "Contact Person1 Name":  rdv.get("Contact Person1 Name", ""),
+        "Contact Person2 Email": rdv.get("Contact Person2 Email", ""),
+        "Contact Person2 Name":  rdv.get("Contact Person2 Name", ""),
         "RDV Date":  day_date.isoformat(),
         "Start Time": start_dt.strftime("%H:%M"),
         "End Time":   end_dt.strftime("%H:%M"),
-        "Duration":   int(r["Duration"]),
-        "Location":   r.get("Location", ""),
+        "Duration":   custom_dur if custom_dur is not None else int(rdv["Duration"]),
+        "Location":   rdv.get("Location", ""),
         "Manager1 Email": m1_email,
         "Manager1 Name":  m1_name,
         "Manager2 Email": m2_email,
         "Manager2 Name":  m2_name,
-        "Status": "Planned",
-        "Hired Date": day_date.isoformat()
-    }
-
-def make_break_row(start_dt, end_dt, day_date, title, new_email, new_name):
-    return {
-        "Newcomer Email": new_email,
-        "Newcomer Name":  new_name,
-        "Role": "",
-        "RDV":  title,
-        "Short RDV Description": title,
-        "Contact Person1 Email": "",
-        "Contact Person1 Name":  "",
-        "Contact Person2 Email": "",
-        "Contact Person2 Name":  "",
-        "RDV Date":  day_date.isoformat(),
-        "Start Time": start_dt.strftime("%H:%M"),
-        "End Time":   end_dt.strftime("%H:%M"),
-        "Duration":   int((end_dt - start_dt).seconds // 60),
-        "Location":   "",
-        "Manager1 Email": "",
-        "Manager1 Name":  "",
-        "Manager2 Email": "",
-        "Manager2 Name":  "",
         "Status": "Planned",
         "Hired Date": day_date.isoformat()
     }
