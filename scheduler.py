@@ -7,23 +7,17 @@ def day_bounds(day_idx: int):
         start = datetime.strptime("10:00", "%H:%M")
         end   = datetime.strptime("18:00", "%H:%M")
         breaks = [
-            (datetime.strptime("11:30", "%H:%M"),
-             datetime.strptime("12:00", "%H:%M")),
-            (datetime.strptime("13:00", "%H:%M"),
-             datetime.strptime("14:00", "%H:%M")),
-            (datetime.strptime("15:30", "%H:%M"),
-             datetime.strptime("16:00", "%H:%M")),
+            (datetime.strptime("11:30", "%H:%M"), datetime.strptime("12:00", "%H:%M")),
+            (datetime.strptime("13:00", "%H:%M"), datetime.strptime("14:00", "%H:%M")),
+            (datetime.strptime("15:30", "%H:%M"), datetime.strptime("16:00", "%H:%M")),
         ]
     else:                                          # Other days
         start = datetime.strptime("09:00", "%H:%M")
         end   = datetime.strptime("17:00", "%H:%M")
         breaks = [
-            (datetime.strptime("10:30", "%H:%M"),
-             datetime.strptime("11:00", "%H:%M")),
-            (datetime.strptime("13:00", "%H:%M"),
-             datetime.strptime("14:00", "%H:%M")),
-            (datetime.strptime("15:30", "%H:%M"),
-             datetime.strptime("16:00", "%H:%M")),
+            (datetime.strptime("10:30", "%H:%M"), datetime.strptime("11:00", "%H:%M")),
+            (datetime.strptime("13:00", "%H:%M"), datetime.strptime("14:00", "%H:%M")),
+            (datetime.strptime("15:30", "%H:%M"), datetime.strptime("16:00", "%H:%M")),
         ]
     return start, end, breaks
 
@@ -32,6 +26,9 @@ def generate_schedule(df, role, hire_date,
                       newcom_name, newcom_email,
                       mgr1_name, mgr1_email,
                       mgr2_name="", mgr2_email="") -> pd.DataFrame:
+
+    # Ensure hire_date is full datetime
+    hire_date = datetime.combine(hire_date, datetime.min.time())
 
     rdvs = df[df["Role"] == role].reset_index(drop=True)
     if rdvs.empty:
@@ -46,12 +43,10 @@ def generate_schedule(df, role, hire_date,
         day_date = hire_date + timedelta(days=day_idx)
         current_dt = datetime.combine(day_date, day_start_t.time())
 
-        # iterate blocks between breaks
         for brk_start_t, brk_end_t in breaks + [(day_end_t, day_end_t)]:
             brk_start = datetime.combine(day_date, brk_start_t.time())
             brk_end   = datetime.combine(day_date, brk_end_t.time())
 
-            # fit RDVs until we hit break
             while rdv_cursor < len(rdvs):
                 rdv = rdvs.loc[rdv_cursor]
                 dur = int(rdv["Duration"])
@@ -65,17 +60,16 @@ def generate_schedule(df, role, hire_date,
                     current_dt = rdv_end
                     rdv_cursor += 1
                 else:
-                    break  # next block
+                    break
 
-            # add break rows (only if within workday)
-            if brk_end_t != day_end_t:             # skip virtual final block
+            if brk_end_t != day_end_t:
                 out.append(make_break_row(brk_start, brk_end, day_date,
                            "Break (Lunch)" if (brk_end - brk_start).seconds >= 3500
                            else "Break (Short)",
                            newcom_email, newcom_name))
                 current_dt = brk_end
 
-        day_idx += 1  # next calendar day
+        day_idx += 1
 
     return pd.DataFrame(out)
 
