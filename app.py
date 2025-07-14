@@ -1,48 +1,42 @@
 import streamlit as st
 import pandas as pd
 from scheduler import generate_schedule
-import io
 
 st.set_page_config(page_title="COSMOS Onboarding Assistant", layout="wide")
 
-st.title("📥 Καλωσήρθατε! Upload το αρχείο σας για να δημιουργήσετε πρόγραμμα ένταξης")
+st.title("👋 Καλωσήρθατε! Upload το αρχείο σας και επιλέξτε ρόλο και ημερομηνία έναρξης.")
 
-uploaded_file = st.file_uploader("📑 Επιλέξτε το Excel αρχείο προτύπου", type="xlsx")
-
+uploaded_file = st.file_uploader("📄 Επιλέξτε το Excel αρχείο προτύπου", type=["xlsx"])
 if uploaded_file:
-    sheet_names = pd.ExcelFile(uploaded_file).sheet_names
-    selected_sheet = st.selectbox("📋 Επιλέξτε φύλλο (Select Sheet)", sheet_names)
+    xls = pd.ExcelFile(uploaded_file)
+    sheet_names = xls.sheet_names
+    selected_sheet = st.selectbox("📑 Επιλέξτε Ρόλο", sheet_names)
     
-    df_template = pd.read_excel(uploaded_file, sheet_name=selected_sheet)
+    df_template = pd.read_excel(xls, sheet_name=selected_sheet)
     
-    # Dynamically extract available roles
-    available_roles = df_template["Role"].dropna().unique()
-    selected_role = st.selectbox("🎓 Επιλέξτε Ρόλο (Select Role)", available_roles)
-
+    st.markdown("---")
     st.subheader("🧍 Newcomer Info")
-    newcomer_name = st.text_input("Full Name", placeholder="e.g. Andreadakis Giannis")
-    newcomer_email = st.text_input("Email", placeholder="e.g. andreadakisg@cbs.gr")
+    newcomer_name = st.text_input("Full Name")
+    newcomer_email = st.text_input("Email")
     start_date = st.date_input("Start Date")
 
     st.subheader("👔 Manager Info")
-    manager1_name = st.text_input("Manager 1 Name", placeholder="e.g. Vassilikos Peter")
-    manager1_email = st.text_input("Manager 1 Email", placeholder="e.g. vassilikosp@cbs.gr")
-    
-    add_second_manager = st.checkbox("➕ Add Manager 2?")
-    manager2_name = ""
-    manager2_email = ""
-    if add_second_manager:
+    manager1_name = st.text_input("Manager 1 Name")
+    manager1_email = st.text_input("Manager 1 Email")
+
+    if st.checkbox("➕ Add Manager 2?"):
         manager2_name = st.text_input("Manager 2 Name (optional)")
         manager2_email = st.text_input("Manager 2 Email (optional)")
+    else:
+        manager2_name = ""
+        manager2_email = ""
 
     if st.button("📅 Generate Schedule / Δημιουργία Προγράμματος"):
-        if not selected_role or not newcomer_name or not newcomer_email:
-            st.error("⚠️ Please fill in all required fields.")
-        else:
+        if newcomer_name and newcomer_email and manager1_name and manager1_email:
             schedule_df = generate_schedule(
                 df_template,
-                selected_role,
-                start_date,
+                selected_sheet,
+                pd.to_datetime(start_date),
                 newcomer_name,
                 newcomer_email,
                 manager1_name,
@@ -50,16 +44,12 @@ if uploaded_file:
                 manager2_name,
                 manager2_email,
             )
-            if schedule_df.empty:
-                st.error("❌ No schedule generated. Please check role name or Excel data.")
-            else:
+            if not schedule_df.empty:
                 st.success("✅ Schedule generated!")
                 st.dataframe(schedule_df)
-
                 csv = schedule_df.to_csv(index=False).encode("utf-8-sig")
-                st.download_button(
-                    label="📥 Download CSV",
-                    data=csv,
-                    file_name=f"{newcomer_name.replace(' ', '_')}_schedule.csv",
-                    mime="text/csv",
-                )
+                st.download_button("⬇️ Download CSV", csv, f"{newcomer_name}_schedule.csv", "text/csv")
+            else:
+                st.warning("⚠️ Schedule is empty. Check your inputs or template.")
+        else:
+            st.error("❌ Please fill all mandatory fields.")
