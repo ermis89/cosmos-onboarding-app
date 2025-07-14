@@ -1,46 +1,57 @@
 import streamlit as st
 import pandas as pd
 from scheduler import generate_schedule
+from datetime import datetime
 
 st.set_page_config(page_title="COSMOS Onboarding Assistant", layout="wide")
 
-st.markdown("## 👥 COSMOS Onboarding Assistant")
-st.markdown("Καλωσήρθατε! Upload το αρχείο σας, επιλέξτε ρόλο και ημερομηνία έναρξης για να δημιουργήσετε το πρόγραμμα ένταξης. (Welcome! Upload your file and select a role/date to generate the onboarding schedule.)")
+st.title("👋 Καλωσήρθατε! Upload το αρχείο σας, επιλέξτε ρόλο και ημερομηνία έναρξης για να δημιουργήσετε το πρόγραμμα ένταξης. (Welcome! Upload your file and select a role/date to generate the onboarding schedule.)")
 
-uploaded_file = st.file_uploader("📂 Επιλέξτε το Excel αρχείο προτύπου (Choose your onboarding Excel template)", type=["xlsx"])
+uploaded_file = st.file_uploader("📑 Επιλέξτε το Excel αρχείο προτύπου (Choose your onboarding Excel template)", type=["xlsx"])
 
 if uploaded_file:
-    try:
-        df_template = pd.read_excel(uploaded_file, sheet_name="Final Template")
-        roles = sorted(df_template["Role"].dropna().unique())
-    except Exception as e:
-        st.error(f"⚠️ Could not read sheet 'Final Template'. Error: {e}")
-        st.stop()
+    xls = pd.ExcelFile(uploaded_file)
+    sheet_names = xls.sheet_names
+    sheet = st.selectbox("🧾 Επιλέξτε Ρόλο (Select Role)", sheet_names)
 
-    role = st.selectbox("🧑‍💼 Επιλέξτε Ρόλο (Select Role)", roles)
-    newcomer_name = st.text_input("🧑‍🤝‍🧑 Όνομα Νεοπροσλαμβανόμενου (New hire full name)")
-    newcomer_email = st.text_input("📧 Email Νεοπροσλαμβανόμενου (New hire email)")
+    if sheet:
+        df_template = pd.read_excel(xls, sheet_name=sheet)
 
-    start_date = st.date_input("🗓️ Ημερομηνία Έναρξης (Start Date)")
+        st.subheader("🧍 Πληροφορίες Νεοεισερχόμενου (Newcomer Info)")
+        newcomer_name = st.text_input("👤 Όνομα Νεοεισερχόμενου / Newcomer Name")
+        newcomer_email = st.text_input("📧 Email Νεοεισερχόμενου / Newcomer Email")
 
-    with st.expander("👥 Πληροφορίες Υπευθύνων (Manager Info)", expanded=True):
-        manager1_name = st.text_input("👤 Manager 1 Name")
-        manager1_email = st.text_input("📧 Manager 1 Email")
-        manager2_name = st.text_input("👤 Manager 2 Name (optional)", "")
-        manager2_email = st.text_input("📧 Manager 2 Email (optional)", "")
+        start_date = st.date_input("📅 Ημερομηνία Έναρξης (Start Date)", format="YYYY/MM/DD")
 
-    if st.button("🗓️ Δημιουργία Προγράμματος / Generate Schedule"):
-        if not newcomer_name or not newcomer_email or not role:
-            st.warning("⚠️ Please fill in all required fields.")
-        else:
-            schedule_df = generate_schedule(
-                df_template, role, start_date, newcomer_name, newcomer_email,
-                manager1_name, manager1_email, manager2_name, manager2_email
-            )
-            st.success("✅ Schedule generated!")
+        with st.expander("👥 Πληροφορίες Υπευθύνων (Manager Info)"):
+            manager1_name = st.text_input("👤 Manager 1 Name", key="mgr1name")
+            manager1_email = st.text_input("📧 Manager 1 Email", key="mgr1email")
+            manager2_name = st.text_input("👤 Manager 2 Name (optional)", key="mgr2name")
+            manager2_email = st.text_input("📧 Manager 2 Email (optional)", key="mgr2email")
 
-            st.dataframe(schedule_df, use_container_width=True)
+        if st.button("📅 Δημιουργία Προγράμματος / Generate Schedule"):
+            if not newcomer_name or not newcomer_email or not manager1_name or not manager1_email:
+                st.error("❗ Παρακαλώ συμπληρώστε όλα τα υποχρεωτικά πεδία (Please fill in all required fields).")
+            else:
+                schedule_df = generate_schedule(
+                    df_template=df_template,
+                    role=sheet,
+                    hire_date=start_date,
+                    newcomer_name=newcomer_name,
+                    newcomer_email=newcomer_email,
+                    mgr1_name=manager1_name,
+                    mgr1_email=manager1_email,
+                    mgr2_name=manager2_name,
+                    mgr2_email=manager2_email
+                )
 
-            csv = schedule_df.to_csv(index=False).encode("utf-8-sig")
-            filename = f"{newcomer_name.replace(' ', '_')}_schedule.csv"
-            st.download_button("📥 Download Schedule as CSV", data=csv, file_name=filename, mime="text/csv")
+                st.success("✅ Schedule generated!")
+                st.dataframe(schedule_df, use_container_width=True)
+
+                csv = schedule_df.to_csv(index=False).encode('utf-8-sig')
+                st.download_button(
+                    label="📥 Download Schedule as CSV",
+                    data=csv,
+                    file_name=f"{newcomer_name.replace(' ', '_')}_schedule.csv",
+                    mime="text/csv"
+                )
