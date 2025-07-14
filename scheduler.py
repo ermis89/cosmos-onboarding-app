@@ -1,58 +1,90 @@
+
 import pandas as pd
-from datetime import timedelta
+from datetime import datetime, timedelta
 
-def generate_schedule(df_template, role, start_date, newcomer_name, newcomer_email, manager1_name, manager1_email, manager2_name, manager2_email):
-    df_role = df_template[df_template["Role"] == role].copy()
-    df_role.reset_index(drop=True, inplace=True)
-    
+def generate_schedule(df, role, start_date, newcomer_name, newcomer_email, m1_name, m1_email, m2_name, m2_email):
+    df = df.copy()
+    df = df[df["Role"] == role]
+
+    day_limit_minutes = 6 * 60
+    first_day_start = datetime.combine(start_date, datetime.strptime("10:00", "%H:%M").time())
+    normal_day_start_time = "09:00"
+
+    output = []
     current_day = start_date
-    daily_start = pd.to_datetime("10:00", format="%H:%M")
-    current_time = daily_start
+    current_time = first_day_start
+    day_minutes = 0
+    day_count = 1
 
-    rdv_dates = []
-    start_times = []
-    end_times = []
-    
-    for _, row in df_role.iterrows():
-        duration_min = int(row["Duration"])
-        rdv_start = current_time
-        rdv_end = rdv_start + timedelta(minutes=duration_min)
+    for idx, row in df.iterrows():
+        duration = int(row["Duration"])
+        location = str(row["Location"]).strip()
 
-        # Add break if needed
-        if rdv_end.time() > pd.to_datetime("18:00", format="%H:%M").time():
-            current_day += timedelta(days=1)
-            current_time = pd.to_datetime("09:00", format="%H:%M")
-            rdv_start = current_time
-            rdv_end = rdv_start + timedelta(minutes=duration_min)
+        if day_minutes + duration > day_limit_minutes:
+            day_count += 1
+            current_day = start_date + timedelta(days=day_count - 1)
+            start_time_str = normal_day_start_time if day_count > 1 else "10:00"
+            current_time = datetime.combine(current_day, datetime.strptime(start_time_str, "%H:%M").time())
+            day_minutes = 0
 
-        rdv_dates.append(current_day.strftime("%Y-%m-%d"))
-        start_times.append(rdv_start.strftime("%H:%M"))
-        end_times.append(rdv_end.strftime("%H:%M"))
-        current_time = rdv_end
+        if day_minutes == 90:
+            output.append(create_break(current_day, current_time, 30, "Break1"))
+            current_time += timedelta(minutes=30)
+            day_minutes += 30
+        elif day_minutes == 240:
+            output.append(create_break(current_day, current_time, 60, "Break2"))
+            current_time += timedelta(minutes=60)
+            day_minutes += 60
 
-    df_role["Newcomer Email"] = newcomer_email
-    df_role["Newcomer Name"] = newcomer_name
-    df_role["Role Group"] = role
-    df_role["RDV Title"] = df_role["RDV"]
-    df_role["RDV Description"] = df_role["Short RDV Description"]
-    df_role["RDV Date"] = rdv_dates
-    df_role["Start Time"] = start_times
-    df_role["End Time"] = end_times
-    df_role["Manager1 Name"] = manager1_name
-    df_role["Manager1 Email"] = manager1_email
-    df_role["Manager2 Name"] = manager2_name if manager2_name else "None"
-    df_role["Manager2 Email"] = manager2_email if manager2_email else "None"
-    df_role["Status"] = "Planned"
-    df_role["Hired Date"] = start_date.strftime("%Y-%m-%d")
+        end_time = current_time + timedelta(minutes=duration)
+        output.append({
+            "Newcomer Email": newcomer_email,
+            "Newcomer Name": newcomer_name,
+            "Role Group": row["Role"],
+            "RDV Title": row["RDV"],
+            "RDV Description": row["Short RDV Description"],
+            "Contact Person1 Email": row.get("Contact Person1 Email", "None"),
+            "Contact Person1 Name": row.get("Contact Person1 Name", "None"),
+            "Contact Person2 Email": row.get("Contact Person2 Email", "None"),
+            "Contact Person2 Name": row.get("Contact Person2 Name", "None"),
+            "RDV Date": current_day.strftime("%Y-%m-%d"),
+            "Start Time": current_time.strftime("%H:%M"),
+            "End Time": end_time.strftime("%H:%M"),
+            "Duration": duration,
+            "Location": location,
+            "Manager1 Email": m1_email,
+            "Manager1 Name": m1_name,
+            "Manager2 Email": m2_email or "None",
+            "Manager2 Name": m2_name or "None",
+            "Status": "Planned",
+            "Hired Date": start_date.strftime("%Y-%m-%d")
+        })
+        current_time = end_time
+        day_minutes += duration
 
-    # Fill contact person columns if missing
-    for col in ["Contact Person1 Email", "Contact Person1 Name", "Contact Person2 Email", "Contact Person2 Name"]:
-        if col not in df_role.columns:
-            df_role[col] = "None"
+    return pd.DataFrame(output)
 
-    columns = ["Newcomer Email", "Newcomer Name", "Role Group", "RDV Title", "RDV Description",
-               "Contact Person1 Email", "Contact Person1 Name", "Contact Person2 Email", "Contact Person2 Name",
-               "RDV Date", "Start Time", "End Time", "Duration", "Location",
-               "Manager1 Email", "Manager1 Name", "Manager2 Email", "Manager2 Name", "Status", "Hired Date"]
-    
-    return df_role[columns]
+def create_break(day, start_time, duration, title):
+    end_time = start_time + timedelta(minutes=duration)
+    return {
+        "Newcomer Email": "Break",
+        "Newcomer Name": "Break",
+        "Role Group": "",
+        "RDV Title": title,
+        "RDV Description": "Short Break" if duration == 30 else "Long Break",
+        "Contact Person1 Email": "None",
+        "Contact Person1 Name": "None",
+        "Contact Person2 Email": "None",
+        "Contact Person2 Name": "None",
+        "RDV Date": day.strftime("%Y-%m-%d"),
+        "Start Time": start_time.strftime("%H:%M"),
+        "End Time": end_time.strftime("%H:%M"),
+        "Duration": duration,
+        "Location": "",
+        "Manager1 Email": "None",
+        "Manager1 Name": "None",
+        "Manager2 Email": "None",
+        "Manager2 Name": "None",
+        "Status": "Planned",
+        "Hired Date": day.strftime("%Y-%m-%d")
+    }
