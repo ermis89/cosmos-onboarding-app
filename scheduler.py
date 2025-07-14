@@ -8,9 +8,9 @@ def day_bounds(day_idx: int):
         start = time(10, 0)
         end   = time(18, 0)
         breaks = [
-            (time(11, 30), time(12,  0)),
-            (time(13,  0), time(14,  0)),
-            (time(15, 30), time(16,  0)),
+            (time(11, 30), time(12,  0)),   # coffee
+            (time(13, 30), time(14, 30)),   # ⬅️  shifted 30 min later
+            (time(15, 30), time(16,  0)),   # coffee
         ]
     else:                                              # Day-2+
         start = time( 9, 0)
@@ -21,6 +21,7 @@ def day_bounds(day_idx: int):
             (time(15, 30), time(16,  0)),
         ]
     return start, end, breaks
+
 
 
 # ── public API ──────────────────────────────────────────────────
