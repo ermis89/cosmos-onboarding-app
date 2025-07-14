@@ -1,90 +1,72 @@
-
 import pandas as pd
 from datetime import datetime, timedelta
 
-def generate_schedule(df, role, start_date, newcomer_name, newcomer_email, m1_name, m1_email, m2_name, m2_email):
-    df = df.copy()
-    df = df[df["Role"] == role]
+def generate_schedule(
+    df_template,
+    role,
+    start_date,
+    newcomer_name,
+    newcomer_email,
+    manager1_name,
+    manager1_email,
+    manager2_name,
+    manager2_email
+):
+    # Filter rows based on role
+    df_role = df_template[df_template["Role"] == role].copy()
+    if df_role.empty:
+        return pd.DataFrame()  # Return empty if role not found
 
-    day_limit_minutes = 6 * 60
-    first_day_start = datetime.combine(start_date, datetime.strptime("10:00", "%H:%M").time())
-    normal_day_start_time = "09:00"
+    df_role.reset_index(drop=True, inplace=True)
 
-    output = []
-    current_day = start_date
-    current_time = first_day_start
-    day_minutes = 0
-    day_count = 1
+    schedule = []
+    current_datetime = datetime.combine(start_date, datetime.strptime("10:00", "%H:%M").time())
+    current_day = 1
 
-    for idx, row in df.iterrows():
-        duration = int(row["Duration"])
-        location = str(row["Location"]).strip()
+    for idx, row in df_role.iterrows():
+        rdv = row.get("RDV Title", "")
+        description = row.get("RDV Description", "")
+        duration = int(row.get("Duration", 60))
+        location = row.get("Location", "")
+        contact1_email = row.get("Contact Person1 Email", "None")
+        contact1_name = row.get("Contact Person1 Name", "None")
+        contact2_email = row.get("Contact Person2 Email", "None")
+        contact2_name = row.get("Contact Person2 Name", "None")
 
-        if day_minutes + duration > day_limit_minutes:
-            day_count += 1
-            current_day = start_date + timedelta(days=day_count - 1)
-            start_time_str = normal_day_start_time if day_count > 1 else "10:00"
-            current_time = datetime.combine(current_day, datetime.strptime(start_time_str, "%H:%M").time())
-            day_minutes = 0
+        if "Break" in rdv:
+            start_time = current_datetime
+            end_time = start_time + timedelta(minutes=duration)
+        else:
+            start_time = current_datetime
+            end_time = start_time + timedelta(minutes=duration)
 
-        if day_minutes == 90:
-            output.append(create_break(current_day, current_time, 30, "Break1"))
-            current_time += timedelta(minutes=30)
-            day_minutes += 30
-        elif day_minutes == 240:
-            output.append(create_break(current_day, current_time, 60, "Break2"))
-            current_time += timedelta(minutes=60)
-            day_minutes += 60
-
-        end_time = current_time + timedelta(minutes=duration)
-        output.append({
+        schedule.append({
             "Newcomer Email": newcomer_email,
             "Newcomer Name": newcomer_name,
-            "Role Group": row["Role"],
-            "RDV Title": row["RDV"],
-            "RDV Description": row["Short RDV Description"],
-            "Contact Person1 Email": row.get("Contact Person1 Email", "None"),
-            "Contact Person1 Name": row.get("Contact Person1 Name", "None"),
-            "Contact Person2 Email": row.get("Contact Person2 Email", "None"),
-            "Contact Person2 Name": row.get("Contact Person2 Name", "None"),
-            "RDV Date": current_day.strftime("%Y-%m-%d"),
-            "Start Time": current_time.strftime("%H:%M"),
+            "Role": role,
+            "RDV": rdv,
+            "Short RDV Description": description,
+            "Contact Person1 Email": contact1_email,
+            "Contact Person1 Name": contact1_name,
+            "Contact Person2 Email": contact2_email,
+            "Contact Person2 Name": contact2_name,
+            "RDV Date": start_date + timedelta(days=current_day - 1),
+            "Start Time": start_time.strftime("%H:%M"),
             "End Time": end_time.strftime("%H:%M"),
             "Duration": duration,
             "Location": location,
-            "Manager1 Email": m1_email,
-            "Manager1 Name": m1_name,
-            "Manager2 Email": m2_email or "None",
-            "Manager2 Name": m2_name or "None",
+            "Manager1 Email": manager1_email,
+            "Manager1 Name": manager1_name,
+            "Manager2 Email": manager2_email or "None",
+            "Manager2 Name": manager2_name or "None",
             "Status": "Planned",
             "Hired Date": start_date.strftime("%Y-%m-%d")
         })
-        current_time = end_time
-        day_minutes += duration
 
-    return pd.DataFrame(output)
+        current_datetime = end_time
 
-def create_break(day, start_time, duration, title):
-    end_time = start_time + timedelta(minutes=duration)
-    return {
-        "Newcomer Email": "Break",
-        "Newcomer Name": "Break",
-        "Role Group": "",
-        "RDV Title": title,
-        "RDV Description": "Short Break" if duration == 30 else "Long Break",
-        "Contact Person1 Email": "None",
-        "Contact Person1 Name": "None",
-        "Contact Person2 Email": "None",
-        "Contact Person2 Name": "None",
-        "RDV Date": day.strftime("%Y-%m-%d"),
-        "Start Time": start_time.strftime("%H:%M"),
-        "End Time": end_time.strftime("%H:%M"),
-        "Duration": duration,
-        "Location": "",
-        "Manager1 Email": "None",
-        "Manager1 Name": "None",
-        "Manager2 Email": "None",
-        "Manager2 Name": "None",
-        "Status": "Planned",
-        "Hired Date": day.strftime("%Y-%m-%d")
-    }
+        if current_datetime.time() >= datetime.strptime("18:00", "%H:%M").time():
+            current_day += 1
+            current_datetime = datetime.combine(start_date + timedelta(days=current_day - 1), datetime.strptime("09:00", "%H:%M").time())
+
+    return pd.DataFrame(schedule)
