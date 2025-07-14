@@ -35,11 +35,17 @@ if xlsx_file:
     mgr2_email = st.text_input("Manager 2 Email", disabled=not add_mgr2)
 
     if st.button("📅 Generate Schedule"):
+        st.warning("🔁 Button was pressed!")  # Debug signal
+
         if not all([newcomer_name, newcomer_email, mgr1_name, mgr1_email]):
             st.warning("Please fill newcomer + Manager 1 info.")
             st.stop()
 
         try:
+            st.write("📋 Selected role:", role)
+            st.write("📄 Template columns:", df_template.columns.tolist())
+            st.write("🧪 First rows of data:", df_template.head())
+
             sched_df = generate_schedule(
                 df_template, role, start_date,
                 newcomer_name, newcomer_email,
@@ -50,7 +56,7 @@ if xlsx_file:
             st.stop()
 
         if sched_df.empty:
-            st.error("No RDVs found for selected role.")
+            st.error("⚠️ No RDVs found for the selected role.")
             st.stop()
 
         st.success("✅ Schedule generated!")
