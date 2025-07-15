@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
-from datetime import date, datetime
-from scheduler import generate_schedule, merge_manual_rdvs  # your scheduler
+from datetime import date
+from scheduler import generate_schedule, merge_manual_rdvs   # ← keep your scheduler
 
 st.set_page_config(page_title="COSMOS Onboarding Assistant", layout="wide")
 st.title("📥 COSMOS Onboarding Assistant")
@@ -91,25 +91,24 @@ if save_clicked:
 # ────────────────────────────────────────────────────────────────
 if st.button("📅 Generate Schedule"):
 
+    # basic required fields
     if not all([newcomer_name, newcomer_email, mgr1_name, mgr1_email]):
         st.warning("Please fill newcomer & Manager‑1 info.")
         st.stop()
 
-    # drop fully blank rows from manual table
-manual_clean = st.session_state.manual_rdvs.dropna(how="all")
+    # 4.a  clean manager table
+    manual_clean = st.session_state.manual_rdvs.dropna(how="all")              # drop blank rows
+    manual_clean = manual_clean[                                                # drop rows w/out required text
+        (manual_clean["Start"].str.strip() != "") |
+        (manual_clean["End"].str.strip()   != "") |
+        (manual_clean["Title"].str.strip() != "")
+    ]
 
-# also drop rows that have no Start/End/Title (the extra blank row Streamlit keeps)
-manual_clean = manual_clean[
-    ~(manual_clean["Start"].str.strip() == "") |
-    ~(manual_clean["End"].str.strip()   == "") |
-    ~(manual_clean["Title"].str.strip() == "")
-]
-
-
+    # 4.b  validate manager rows
     bad_rows = manual_clean[
         manual_clean["Date"].isna() |
         (manual_clean["Start"].str.strip() == "") |
-        (manual_clean["End"].str.strip() == "") |
+        (manual_clean["End"].str.strip()   == "") |
         (manual_clean["Title"].str.strip() == "")
     ]
     if not bad_rows.empty:
@@ -117,18 +116,22 @@ manual_clean = manual_clean[
         st.stop()
 
     try:
+        # auto schedule
         sched_df = generate_schedule(
             df_template, role, start_date,
             newcomer_name, newcomer_email,
             mgr1_name, mgr1_email,
             mgr2_name, mgr2_email
         )
+
+        # merge manual priority rows
         final_df = merge_manual_rdvs(
             sched_df, manual_clean,
             newcomer_name, newcomer_email,
             mgr1_name, mgr1_email,
             mgr2_name, mgr2_email
         )
+
     except Exception as e:
         st.exception(e)
         st.stop()
@@ -138,5 +141,4 @@ manual_clean = manual_clean[
 
     csv = final_df.to_csv(index=False).encode("utf-8-sig")
     filename = f"{newcomer_name.replace(' ', '_')}_schedule.csv"
-    st.download_button("⬇️ Download CSV", csv,
-                       file_name=filename, mime="text/csv")
+    st.download_button("⬇️ Download CSV", csv, file_name=filename, mime="text/csv")
