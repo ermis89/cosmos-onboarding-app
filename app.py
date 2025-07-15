@@ -54,6 +54,7 @@ DEFAULT_ROW = {
     "Date":        start_date,
     "Start":       "09:00",
     "End":         "09:30",
+    "Location":    "",
     "Title":       "",
     "Description": "",
     "C1 Name":     "",
@@ -67,13 +68,19 @@ if "manual_rdvs" not in st.session_state:
     st.session_state.manual_rdvs = pd.DataFrame([DEFAULT_ROW])
 
 with st.form("manual_form", clear_on_submit=False):
-    edited_df = st.data_editor(
-        st.session_state.manual_rdvs,
-        num_rows="dynamic",
-        use_container_width=True,
-        hide_index=True,
-        key="manual_editor",
-    )
+   edited_df = st.data_editor(
+    st.session_state.manual_rdvs,
+    num_rows="dynamic",
+    use_container_width=True,
+    hide_index=True,
+    key="manual_editor",
+    column_config={
+        "Date":      st.column_config.DateColumn("Date"),
+        "Start":     st.column_config.TextColumn("Start (HH:MM)"),
+        "End":       st.column_config.TextColumn("End (HH:MM)"),
+        "Location":  st.column_config.TextColumn("Location"),   # NEW
+    }
+)
     save_clicked = st.form_submit_button("💾 Save changes")
 
 if save_clicked:
