@@ -95,7 +95,16 @@ if st.button("📅 Generate Schedule"):
         st.warning("Please fill newcomer & Manager‑1 info.")
         st.stop()
 
-    manual_clean = st.session_state.manual_rdvs.dropna(how="all")
+    # drop fully blank rows from manual table
+manual_clean = st.session_state.manual_rdvs.dropna(how="all")
+
+# also drop rows that have no Start/End/Title (the extra blank row Streamlit keeps)
+manual_clean = manual_clean[
+    ~(manual_clean["Start"].str.strip() == "") |
+    ~(manual_clean["End"].str.strip()   == "") |
+    ~(manual_clean["Title"].str.strip() == "")
+]
+
 
     bad_rows = manual_clean[
         manual_clean["Date"].isna() |
