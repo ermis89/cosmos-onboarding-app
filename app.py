@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import date, datetime
-from scheduler import generate_schedule, merge_manual_rdvs  # <- keep your scheduler
+from scheduler import generate_schedule, merge_manual_rdvs  # your scheduler
 
 st.set_page_config(page_title="COSMOS Onboarding Assistant", layout="wide")
 st.title("📥 COSMOS Onboarding Assistant")
@@ -15,7 +15,7 @@ xlsx_file = st.file_uploader(
 )
 
 if not xlsx_file:
-    st.stop()   # nothing else until file provided
+    st.stop()
 
 try:
     df_template = pd.read_excel(xlsx_file, sheet_name="Final Template")
@@ -63,24 +63,23 @@ DEFAULT_ROW = {
     "C2 Email":    ""
 }
 
-# first time in session, seed with one blank row
 if "manual_rdvs" not in st.session_state:
     st.session_state.manual_rdvs = pd.DataFrame([DEFAULT_ROW])
 
 with st.form("manual_form", clear_on_submit=False):
-   edited_df = st.data_editor(
-    st.session_state.manual_rdvs,
-    num_rows="dynamic",
-    use_container_width=True,
-    hide_index=True,
-    key="manual_editor",
-    column_config={
-        "Date":      st.column_config.DateColumn("Date"),
-        "Start":     st.column_config.TextColumn("Start (HH:MM)"),
-        "End":       st.column_config.TextColumn("End (HH:MM)"),
-        "Location":  st.column_config.TextColumn("Location"),   # NEW
-    }
-)
+    edited_df = st.data_editor(
+        st.session_state.manual_rdvs,
+        num_rows="dynamic",
+        use_container_width=True,
+        hide_index=True,
+        key="manual_editor",
+        column_config={
+            "Date":     st.column_config.DateColumn("Date"),
+            "Start":    st.column_config.TextColumn("Start (HH:MM)"),
+            "End":      st.column_config.TextColumn("End (HH:MM)"),
+            "Location": st.column_config.TextColumn("Location"),
+        }
+    )
     save_clicked = st.form_submit_button("💾 Save changes")
 
 if save_clicked:
@@ -92,15 +91,12 @@ if save_clicked:
 # ────────────────────────────────────────────────────────────────
 if st.button("📅 Generate Schedule"):
 
-    # basic required fields
     if not all([newcomer_name, newcomer_email, mgr1_name, mgr1_email]):
         st.warning("Please fill newcomer & Manager‑1 info.")
         st.stop()
 
-    # drop fully blank rows from manual table
     manual_clean = st.session_state.manual_rdvs.dropna(how="all")
 
-    # validate required columns in manual rows
     bad_rows = manual_clean[
         manual_clean["Date"].isna() |
         (manual_clean["Start"].str.strip() == "") |
@@ -112,21 +108,18 @@ if st.button("📅 Generate Schedule"):
         st.stop()
 
     try:
-        # auto schedule
         sched_df = generate_schedule(
             df_template, role, start_date,
             newcomer_name, newcomer_email,
             mgr1_name, mgr1_email,
             mgr2_name, mgr2_email
         )
-        # merge manual priority rows
         final_df = merge_manual_rdvs(
             sched_df, manual_clean,
             newcomer_name, newcomer_email,
             mgr1_name, mgr1_email,
             mgr2_name, mgr2_email
         )
-
     except Exception as e:
         st.exception(e)
         st.stop()
