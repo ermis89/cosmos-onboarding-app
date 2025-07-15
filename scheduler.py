@@ -77,16 +77,8 @@ def generate_schedule(df_template: pd.DataFrame,
                     cursor_dt = rdv_end
                     rdv_idx  += 1
                 else:
-                    remaining = int((bl_end - cursor_dt).total_seconds() // 60)
-                    if remaining > 0:
-                        rows.append(make_row(
-                            rdv, newcomer_name, newcomer_email,
-                            mgr1_name, mgr1_email, mgr2_name, mgr2_email,
-                            cursor_dt, bl_end, day_date,
-                            suffix=" (cont.)", custom_dur=remaining
-                        ))
-                        rdvs.at[rdv_idx, "Duration"] = dur_min - remaining
-                    break
+    # entire RDV goes to the next block/day
+    break
         day_idx += 1
 
     return pd.DataFrame(rows, columns=OUTPUT_COLS)
