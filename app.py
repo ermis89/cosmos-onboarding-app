@@ -114,6 +114,21 @@ if st.button("📅 Generate Schedule"):
             mgr1_name, mgr1_email,
             mgr2_name, mgr2_email
         )
+
+    # ⬇️ NEW — show what auto‑scheduler produced
+    st.write("🔍 Auto‑scheduler rows:", len(auto_df))
+    st.write(auto_df.head())
+
+    final_df = merge_manual_rdvs(
+        auto_df, manual_clean,
+        newcomer_name, newcomer_email,
+        mgr1_name, mgr1_email,
+        mgr2_name, mgr2_email
+    )
+    # ⬇️ NEW — show rows after merging manual RDVs
+    st.write("🔍 Final rows after merge:", len(final_df))
+    st.write(final_df.head())
+    
     except Exception as e:
         st.exception(e)
         st.stop()
