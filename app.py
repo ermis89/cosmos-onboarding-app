@@ -7,34 +7,27 @@ st.set_page_config(layout="wide")
 st.title("📅 COSMOS Onboarding Assistant")
 
 # ────────────────────────────────────────────────────────────────
-# 1. Upload template
+# 1. Upload template (first row already contains headers)
 # ────────────────────────────────────────────────────────────────
 xlsx_file = st.file_uploader(
-    "Upload Training Program.xlsx (must contain sheet ‘Final Template’)",
-    type=["xlsx", "xls", "csv"]
+    "Upload Training Program.xlsx (sheet ‘Final Template’). First row must be headers.",
+    type=["xlsx", "xls"]
 )
 if not xlsx_file:
     st.stop()
 
-# load file (supports Excel or CSV for convenience)
-if xlsx_file.name.lower().endswith((".xls", ".xlsx")):
-    df_template = pd.read_excel(xlsx_file, sheet_name=0)
-else:  # fallback CSV
-    df_template = pd.read_csv(xlsx_file)
-
-# 🧹 normalize column names (strip spaces)
-df_template.columns = df_template.columns.str.strip()
-
-# show available columns for debug
-st.write("🧩 Detected columns:", df_template.columns.tolist())
-
-# verify Role column exists
-if "Role" not in df_template.columns:
-    st.error("❌ Column ‘Role’ not found in uploaded file. "
-             "Please ensure the header cell is exactly 'Role'.")
+try:
+    df_template = pd.read_excel(xlsx_file, sheet_name="Final Template", header=0)
+    df_template.columns = df_template.columns.str.strip()          # trim spaces
+except Exception as e:
+    st.exception(e)
     st.stop()
 
-# (optional) ensure Duration numeric
+if "Role" not in df_template.columns:
+    st.error(f"'Role' column not found. Detected columns: {list(df_template.columns)}")
+    st.stop()
+
+# ensure Duration numeric
 if "Duration" in df_template.columns:
     df_template["Duration"] = pd.to_numeric(df_template["Duration"], errors="coerce")
 
@@ -42,9 +35,7 @@ if "Duration" in df_template.columns:
 roles = sorted(df_template["Role"].dropna().unique())
 role = st.selectbox("Role", roles)
 
-# ────────────────────────────────────────────────────────────────
-# 2. Newcomer & Manager info
-# ────────────────────────────────────────────────────────────────
+# ───── newcomer & manager fields ────────────────────────────────
 st.subheader("Newcomer Info")
 newcomer_name  = st.text_input("Newcomer Name")
 newcomer_email = st.text_input("Newcomer Email")
@@ -57,9 +48,7 @@ add_mgr2   = st.checkbox("Add Manager 2?")
 mgr2_name  = st.text_input("Manager 2 Name",  disabled=not add_mgr2)
 mgr2_email = st.text_input("Manager 2 Email", disabled=not add_mgr2)
 
-# ────────────────────────────────────────────────────────────────
-# 3. Manager‑priority RDVs table
-# ────────────────────────────────────────────────────────────────
+# ───── manager‑priority RDVs table ──────────────────────────────
 st.subheader("Manager Changes (priority RDVs)")
 default_row = {
     "Date":        start_date,
@@ -85,28 +74,22 @@ if st.button("💾 Save changes"):
     st.session_state.manual_rdvs = edited_df.copy()
     st.success("Changes saved!")
 
-# ────────────────────────────────────────────────────────────────
-# 4. Generate schedule
-# ────────────────────────────────────────────────────────────────
+# ───── generate schedule ───────────────────────────────────────
 if st.button("📅 Generate Schedule"):
 
-    # store latest edits even if Save not clicked
-    st.session_state.manual_rdvs = edited_df.copy()
+    st.session_state.manual_rdvs = edited_df.copy()  # capture latest edits
 
-    # basic required fields
     if not all([newcomer_name, newcomer_email, mgr1_name, mgr1_email]):
         st.warning("Please fill newcomer & Manager‑1 info.")
         st.stop()
 
     # clean manual table
-    manual_clean = st.session_state.manual_rdvs.dropna(how="all")
-    manual_clean = manual_clean[
-        (manual_clean["Start"].str.strip() != "") |
-        (manual_clean["End"].str.strip()   != "") |
-        (manual_clean["Title"].str.strip() != "")
-    ]
+    manual_clean = (st.session_state.manual_rdvs
+                    .dropna(how="all")
+                    .query("Start.str.strip() != '' or End.str.strip() != '' or Title.str.strip() != ''",
+                           engine="python"))
 
-    # validate required fields
+    # validate mandatory fields
     bad_rows = manual_clean[
         manual_clean["Date"].isna() |
         (manual_clean["Start"].str.strip() == "") |
@@ -117,16 +100,16 @@ if st.button("📅 Generate Schedule"):
         st.warning("Every manual RDV row needs Date, Start, End and Title.")
         st.stop()
 
-    # build schedule
+    # build schedules
     try:
-        sched_df = generate_schedule(
+        auto_df = generate_schedule(
             df_template, role, start_date,
             newcomer_name, newcomer_email,
             mgr1_name, mgr1_email,
             mgr2_name, mgr2_email
         )
         final_df = merge_manual_rdvs(
-            sched_df, manual_clean,
+            auto_df, manual_clean,
             newcomer_name, newcomer_email,
             mgr1_name, mgr1_email,
             mgr2_name, mgr2_email
@@ -136,12 +119,11 @@ if st.button("📅 Generate Schedule"):
         st.stop()
 
     if final_df.empty:
-        st.error("No RDVs generated — check template or time overlaps.")
+        st.error("No RDVs generated — check template or overlaps.")
         st.stop()
 
     st.success("✅ Final schedule created!")
     st.dataframe(final_df, use_container_width=True)
-
     csv = final_df.to_csv(index=False).encode("utf-8-sig")
     fname = f"{newcomer_name.replace(' ', '_')}_schedule.csv"
     st.download_button("⬇️ Download CSV", csv, file_name=fname, mime="text/csv")
