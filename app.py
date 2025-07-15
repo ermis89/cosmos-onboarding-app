@@ -102,36 +102,30 @@ if st.button("📅 Generate Schedule"):
 
     # build schedules
     try:
+        # 1️⃣ auto‑scheduler
         auto_df = generate_schedule(
             df_template, role, start_date,
             newcomer_name, newcomer_email,
             mgr1_name, mgr1_email,
             mgr2_name, mgr2_email
         )
+        st.write("🔍 Auto‑scheduler rows:", len(auto_df))
+        st.write(auto_df.head())
+
+        # 2️⃣ merge manager overrides
         final_df = merge_manual_rdvs(
             auto_df, manual_clean,
             newcomer_name, newcomer_email,
             mgr1_name, mgr1_email,
             mgr2_name, mgr2_email
         )
+        st.write("🔍 Final rows after merge:", len(final_df))
+        st.write(final_df.head())
 
-    # ⬇️ NEW — show what auto‑scheduler produced
-    st.write("🔍 Auto‑scheduler rows:", len(auto_df))
-    st.write(auto_df.head())
-
-    final_df = merge_manual_rdvs(
-        auto_df, manual_clean,
-        newcomer_name, newcomer_email,
-        mgr1_name, mgr1_email,
-        mgr2_name, mgr2_email
-    )
-    # ⬇️ NEW — show rows after merging manual RDVs
-    st.write("🔍 Final rows after merge:", len(final_df))
-    st.write(final_df.head())
-    
     except Exception as e:
         st.exception(e)
         st.stop()
+  
 
     if final_df.empty:
         st.error("No RDVs generated — check template or overlaps.")
