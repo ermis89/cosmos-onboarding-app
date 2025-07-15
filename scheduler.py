@@ -50,16 +50,6 @@ def generate_schedule(df_template: pd.DataFrame,
         # skip weekends
         day_date = hire_date + timedelta(days=day_idx)
         while day_date.weekday() >= 5:
-            day_idx += 1
-            day_date = hire_date + timedelta(days=day_idx)
-
-        # build day blocks
-        day_start, day_end, breaks = day_bounds(day_idx)
-        blocks, cursor = [], datetime.combine(day_date, day_start)
-        for bs, be in breaks + [(day_end, day_end)]:
-            blocks.append((cursor, datetime.combine(day_date, bs)))
-            cursor = datetime.combine(day_date, be)
-
         # fill blocks
         for bl_start, bl_end in blocks:
             cursor_dt = bl_start
@@ -67,6 +57,19 @@ def generate_schedule(df_template: pd.DataFrame,
                 rdv      = rdvs.loc[rdv_idx]
                 dur_min  = int(rdv["Duration"])
                 rdv_end  = cursor_dt + timedelta(minutes=dur_min)
+
+                if rdv_end <= bl_end:
+                    rows.append(make_row(
+                        rdv, newcomer_name, newcomer_email,
+                        mgr1_name, mgr1_email, mgr2_name, mgr2_email,
+                        cursor_dt, rdv_end, day_date
+                    ))
+                    cursor_dt = rdv_end
+                    rdv_idx  += 1
+                else:
+                    # entire RDV goes to the next block/day
+                    break       # <-- SAME indentation as the comment line
+        day_idx += 1
 
                 if rdv_end <= bl_end:
                     rows.append(make_row(
