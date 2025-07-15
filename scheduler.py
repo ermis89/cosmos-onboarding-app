@@ -2,37 +2,36 @@ import pandas as pd
 from datetime import datetime, timedelta, time
 
 # ────────────────────────────────────────────────────────────────
-# Day template (Day‑1 vs Day‑2+)
+#  Day template
 # ────────────────────────────────────────────────────────────────
 def day_bounds(day_idx: int):
-    """Return (start, end, breaks) for a 0‑based day index."""
-    if day_idx == 0:                                       # Day‑1
+    """Return (start, end, breaks) tuple for the given 0‑based day index."""
+    if day_idx == 0:                                   # Day‑1
         start, end = time(10, 0), time(18, 0)
         breaks = [
-            (time(11, 30), time(12,  0)),
-            (time(13, 30), time(14, 30)),   # shifted lunch
-            (time(15, 30), time(16,  0)),
+            (time(11, 30), time(12, 0)),
+            (time(13, 30), time(14, 30)),              # shifted lunch
+            (time(15, 30), time(16, 0)),
         ]
-    else:                                                  # Day‑2+
-        start, end = time( 9, 0), time(17, 0)
+    else:                                              # Day‑2+
+        start, end = time(9, 0), time(17, 0)
         breaks = [
-            (time(10, 30), time(11,  0)),
-            (time(13,  0), time(14,  0)),
-            (time(15, 30), time(16,  0)),
+            (time(10, 30), time(11, 0)),
+            (time(13, 0),  time(14, 0)),
+            (time(15, 30), time(16, 0)),
         ]
     return start, end, breaks
 
 
 # ────────────────────────────────────────────────────────────────
-# Auto schedule (NO splitting)
+#  Auto‑generate schedule (NO splitting across blocks)
 # ────────────────────────────────────────────────────────────────
-def generate_schedule(
-        df_template: pd.DataFrame,
-        role: str,
-        hire_date,                         # date or datetime
-        newcomer_name: str, newcomer_email: str,
-        mgr1_name: str, mgr1_email: str,
-        mgr2_name: str = "", mgr2_email: str = "") -> pd.DataFrame:
+def generate_schedule(df_template: pd.DataFrame,
+                      role: str,
+                      hire_date,                         # date or datetime
+                      newcom_name: str, newcom_email: str,
+                      mgr1_name: str, mgr1_email: str,
+                      mgr2_name: str = "", mgr2_email: str = "") -> pd.DataFrame:
 
     if isinstance(hire_date, datetime):
         hire_date = hire_date.date()
@@ -40,80 +39,81 @@ def generate_schedule(
     rdvs = (df_template[df_template["Role"].str.strip() == role.strip()]
             .sort_values("Order")
             .reset_index(drop=True))
-    if rdvs.empty:
-        return pd.DataFrame(columns=OUTPUT_COLS)
+
+    if rdvs.empty():
+        raise ValueError(f"No rows found for role “{role}”. Check the spreadsheet.")
 
     rows, day_idx, rdv_idx = [], 0, 0
     while rdv_idx < len(rdvs):
 
         # skip weekends
         day_date = hire_date + timedelta(days=day_idx)
-        while day_date.weekday() >= 5:  # Sat/Sun
+        while day_date.weekday() >= 5:                  # Sat/Sun
             day_idx += 1
             day_date = hire_date + timedelta(days=day_idx)
 
+        # build working blocks for that day
         day_start, day_end, breaks = day_bounds(day_idx)
-
-        # build blocks
-        blocks, cur_ptr = [], datetime.combine(day_date, day_start)
+        blocks, ptr = [], datetime.combine(day_date, day_start)
         for bs, be in breaks + [(day_end, day_end)]:
-            blocks.append((cur_ptr, datetime.combine(day_date, bs)))
-            cur_ptr = datetime.combine(day_date, be)
+            blocks.append((ptr, datetime.combine(day_date, bs)))
+            ptr = datetime.combine(day_date, be)
 
-        # fill blocks (no split)
+        # place RDVs
         for bl_s, bl_e in blocks:
-            cursor = max(cur_ptr, bl_s)
+            cursor = max(ptr, bl_s)
             while rdv_idx < len(rdvs):
-                rdv       = rdvs.loc[rdv_idx]
-                dur       = int(rdv["Duration"])
-                rdv_end   = cursor + timedelta(minutes=dur)
+                rdv = rdvs.loc[rdv_idx]
+                dur = int(rdv["Duration"])
+                rdv_end = cursor + timedelta(minutes=dur)
+
                 if rdv_end <= bl_e:
                     rows.append(make_row(
-                        rdv, newcomer_name, newcomer_email,
-                        mgr1_name, mgr1_email, mgr2_name, mgr2_email,
+                        rdv, newcom_name, newcom_email,
+                        mgr1_name, mgr1_email,
+                        mgr2_name, mgr2_email,
                         cursor, rdv_end, day_date
                     ))
-                    cursor  = rdv_end
+                    cursor = rdv_end
                     rdv_idx += 1
                 else:
-                    break  # move whole RDV to next block/day
+                    break  # RDV moves to next block/day
         day_idx += 1
 
     return pd.DataFrame(rows, columns=OUTPUT_COLS)
 
 
 # ────────────────────────────────────────────────────────────────
-# Merge manager‑priority RDVs
+#  Merge manager‑priority RDVs
 # ────────────────────────────────────────────────────────────────
 def merge_manual_rdvs(auto_df: pd.DataFrame,
                       manual_df: pd.DataFrame,
-                      newcomer_name: str, newcomer_email: str,
+                      newcom_name: str, newcom_email: str,
                       mgr1_name: str, mgr1_email: str,
                       mgr2_name: str, mgr2_email: str) -> pd.DataFrame:
-    """Insert manual RDVs; reschedule (don’t delete) any collided auto RDVs."""
+    """Insert manual RDVs; reschedule (do not delete) collided auto RDVs."""
+    def to_dt(d, t):
+        return datetime.strptime(f"{d} {t}", "%Y-%m-%d %H:%M")
 
-    def to_dt(d, t): return datetime.strptime(f"{d} {t}", "%Y-%m-%d %H:%M")
-
-    # build manual rows → 20‑col
     manual_rows, occupied = [], []
-    for _, row in manual_df.iterrows():
-        s_dt = to_dt(row["Date"].strftime("%Y-%m-%d"), row["Start"])
-        e_dt = to_dt(row["Date"].strftime("%Y-%m-%d"), row["End"])
+    for _, r in manual_df.iterrows():
+        s_dt = to_dt(r["Date"].strftime("%Y-%m-%d"), r["Start"])
+        e_dt = to_dt(r["Date"].strftime("%Y-%m-%d"), r["End"])
         manual_rows.append({
-            "Newcomer Email": newcomer_email,
-            "Newcomer Name":  newcomer_name,
+            "Newcomer Email": newcom_email,
+            "Newcomer Name":  newcom_name,
             "Role Group":     auto_df["Role Group"].iloc[0] if not auto_df.empty else "",
-            "RDV Title":      row["Title"],
-            "RDV Description": row["Description"],
-            "Contact Person1 Email": row["C1 Email"],
-            "Contact Person1 Name":  row["C1 Name"],
-            "Contact Person2 Email": row["C2 Email"],
-            "Contact Person2 Name":  row["C2 Name"],
+            "RDV Title":      r["Title"],
+            "RDV Description": r["Description"],
+            "Contact Person1 Email": r["C1 Email"],
+            "Contact Person1 Name":  r["C1 Name"],
+            "Contact Person2 Email": r["C2 Email"],
+            "Contact Person2 Name":  r["C2 Name"],
             "RDV Date":  s_dt.date().isoformat(),
             "Start Time": s_dt.strftime("%H:%M"),
             "End Time":   e_dt.strftime("%H:%M"),
             "Duration":   int((e_dt - s_dt).seconds // 60),
-            "Location":   row.get("Location", ""),
+            "Location":   r.get("Location", ""),
             "Manager1 Email": mgr1_email,
             "Manager1 Name":  mgr1_name,
             "Manager2 Email": mgr2_email,
@@ -127,29 +127,30 @@ def merge_manual_rdvs(auto_df: pd.DataFrame,
 
     # split auto into keep & queue
     queue, keep = [], []
-    for _, r in auto_df.iterrows():
-        a_s, a_e = to_dt(r["RDV Date"], r["Start Time"]), to_dt(r["RDV Date"], r["End Time"])
+    for _, a in auto_df.iterrows():
+        a_s = to_dt(a["RDV Date"], a["Start Time"])
+        a_e = to_dt(a["RDV Date"], a["End Time"])
         if any(not (a_e <= o_s or a_s >= o_e) for o_s, o_e in occupied):
-            queue.append(r)
+            queue.append(a)
         else:
-            keep.append(r)
+            keep.append(a)
 
+    # reschedule queued RDVs
     if queue:
-        moved = _reschedule_queue(pd.DataFrame(queue), occupied)
-        keep.extend(moved)
+        keep.extend(_reschedule_queue(pd.DataFrame(queue), occupied))
 
-    final_df = pd.concat([manual_df_clean, pd.DataFrame(keep)], ignore_index=True)
-    return final_df.sort_values(["RDV Date", "Start Time"]).reset_index(drop=True)
+    final = pd.concat([manual_df_clean, pd.DataFrame(keep)], ignore_index=True)
+    return final.sort_values(["RDV Date", "Start Time"]).reset_index(drop=True)
 
 
 # ────────────────────────────────────────────────────────────────
-# Mini‑scheduler for queued RDVs
+#  Reschedule queued RDVs helper
 # ────────────────────────────────────────────────────────────────
 def _reschedule_queue(queue_df: pd.DataFrame, occupied):
-    """Reschedule queued RDVs after occupied slots, respecting breaks."""
+    """Reschedule queued RDVs respecting breaks & weekends."""
     moved = []
 
-    def next_workday(dt):  # 09:00 next non‑weekend
+    def next_workday(dt):
         nxt = dt.date() + timedelta(days=1)
         while nxt.weekday() >= 5:
             nxt += timedelta(days=1)
@@ -160,17 +161,16 @@ def _reschedule_queue(queue_df: pd.DataFrame, occupied):
         cur = datetime.strptime(f"{rdv['RDV Date']} {rdv['Start Time']}", "%Y-%m-%d %H:%M")
         placed = False
         while not placed:
-            day_idx = (cur.date() - occupied[0][0].date()).days
-            d_start, d_end, breaks = day_bounds(day_idx)
+            idx = (cur.date() - occupied[0][0].date()).days
+            d_start, d_end, breaks = day_bounds(idx)
 
-            # drop breaks fully covered by an occupied interval
+            # drop breaks fully covered by occupied intervals
             breaks = [
                 (bs, be) for (bs, be) in breaks
                 if not any(o.date() == cur.date() and o.time() <= bs and be <= e.time()
                            for o, e in occupied)
             ]
 
-            # build blocks
             blocks, ptr = [], datetime.combine(cur.date(), d_start)
             for bs, be in breaks + [(d_end, d_end)]:
                 blocks.append((ptr, datetime.combine(cur.date(), bs)))
@@ -179,36 +179,39 @@ def _reschedule_queue(queue_df: pd.DataFrame, occupied):
             for bl_s, bl_e in blocks:
                 if bl_e <= cur:
                     continue
-                start = max(bl_s, cur)
-                end   = start + timedelta(minutes=dur)
+                start, end = max(bl_s, cur), None
+                end = start + timedelta(minutes=dur)
                 if end > bl_e:
                     continue
                 clash = any(not (end <= o_s or start >= o_e) for o_s, o_e in occupied)
                 if not clash:
-                    new_r = rdv.copy()
-                    new_r["RDV Date"]   = start.date().isoformat()
-                    new_r["Start Time"] = start.strftime("%H:%M")
-                    new_r["End Time"]   = end.strftime("%H:%M")
+                    n = rdv.copy()
+                    n["RDV Date"] = start.date().isoformat()
+                    n["Start Time"] = start.strftime("%H:%M")
+                    n["End Time"]   = end.strftime("%H:%M")
                     occupied.append((start, end))
-                    moved.append(new_r)
+                    moved.append(n)
                     placed = True
                     break
             if not placed:
                 cur = next_workday(cur)
-
     return moved
 
 
 # ────────────────────────────────────────────────────────────────
-#  Output column order for convenience
+#  Helper to build row dict
 # ────────────────────────────────────────────────────────────────
-OUTPUT_COLS = [
-    "Newcomer Email", "Newcomer Name", "Role Group",
-    "RDV Title", "RDV Description",
-    "Contact Person1 Email", "Contact Person1 Name",
-    "Contact Person2 Email", "Contact Person2 Name",
-    "RDV Date", "Start Time", "End Time", "Duration",
-    "Location", "Manager1 Email", "Manager1 Name",
-    "Manager2 Email", "Manager2 Name",
-    "Status", "Hired Date"
-]
+def make_row(rdv, new_name, new_email,
+             m1_name, m1_email, m2_name, m2_email,
+             start_dt, end_dt, day_date):
+    return {
+        "Newcomer Email": new_email,
+        "Newcomer Name":  new_name,
+        "Role Group":     rdv["Role"],
+        "RDV Title":      rdv["RDV"],
+        "RDV Description": rdv["Short RDV Description"],
+        "Contact Person1 Email": rdv.get("Contact Person1 Email", ""),
+        "Contact Person1 Name":  rdv.get("Contact Person1 Name", ""),
+        "Contact Person2 Email": rdv.get("Contact Person2 Email", ""),
+        "Contact Person2 Name":  rdv.get("Contact Person2 Name", ""),
+        "
