@@ -1,98 +1,121 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import date
 from scheduler import generate_schedule, merge_manual_rdvs
 
 st.set_page_config(layout="wide")
 st.title("📅 COSMOS Onboarding Assistant")
 
+# ────────────────────────────────────────────────────────────────
 # 1. Upload template
-st.subheader("1. Upload RDV Template Excel")
-template_file = st.file_uploader("Upload Excel", type=["xlsx"])
-if not template_file:
+# ────────────────────────────────────────────────────────────────
+xlsx_file = st.file_uploader(
+    "Upload Training Program.xlsx (must contain sheet ‘Final Template’)",
+    type=["xlsx", "xls", "csv"]
+)
+if not xlsx_file:
     st.stop()
 
-df_template = pd.read_excel(template_file)
-roles = df_template["Role"].dropna().unique().tolist()
+# load file (supports Excel or CSV for convenience)
+if xlsx_file.name.lower().endswith((".xls", ".xlsx")):
+    df_template = pd.read_excel(xlsx_file, sheet_name=0)
+else:  # fallback CSV
+    df_template = pd.read_csv(xlsx_file)
 
-# 2. Newcomer Info
-st.subheader("2. Newcomer Info")
-col1, col2 = st.columns(2)
-newcomer_name = col1.text_input("Newcomer Name")
-newcomer_email = col2.text_input("Newcomer Email")
+# 🧹 normalize column names (strip spaces)
+df_template.columns = df_template.columns.str.strip()
 
-col3, col4 = st.columns(2)
-role = col3.selectbox("Role", roles)
-start_date = col4.date_input("Hire Date", datetime.today())
+# show available columns for debug
+st.write("🧩 Detected columns:", df_template.columns.tolist())
 
-# 3. Manager info
-st.subheader("3. Managers Info")
-mgr1_name = st.text_input("Manager 1 Name")
+# verify Role column exists
+if "Role" not in df_template.columns:
+    st.error("❌ Column ‘Role’ not found in uploaded file. "
+             "Please ensure the header cell is exactly 'Role'.")
+    st.stop()
+
+# (optional) ensure Duration numeric
+if "Duration" in df_template.columns:
+    df_template["Duration"] = pd.to_numeric(df_template["Duration"], errors="coerce")
+
+# roles list
+roles = sorted(df_template["Role"].dropna().unique())
+role = st.selectbox("Role", roles)
+
+# ────────────────────────────────────────────────────────────────
+# 2. Newcomer & Manager info
+# ────────────────────────────────────────────────────────────────
+st.subheader("Newcomer Info")
+newcomer_name  = st.text_input("Newcomer Name")
+newcomer_email = st.text_input("Newcomer Email")
+start_date     = st.date_input("Hire Date", value=date.today())
+
+st.subheader("Manager Info")
+mgr1_name  = st.text_input("Manager 1 Name")
 mgr1_email = st.text_input("Manager 1 Email")
-mgr2_name = st.text_input("Manager 2 Name (optional)", "")
-mgr2_email = st.text_input("Manager 2 Email (optional)", "")
+add_mgr2   = st.checkbox("Add Manager 2?")
+mgr2_name  = st.text_input("Manager 2 Name",  disabled=not add_mgr2)
+mgr2_email = st.text_input("Manager 2 Email", disabled=not add_mgr2)
 
-# 4. Manual RDV overrides
-st.subheader("4. Manager Changes (priority RDVs)")
-
+# ────────────────────────────────────────────────────────────────
+# 3. Manager‑priority RDVs table
+# ────────────────────────────────────────────────────────────────
+st.subheader("Manager Changes (priority RDVs)")
 default_row = {
-    "Date": datetime.today().date(),
-    "Start": "09:00",
-    "End": "09:30",
-    "Location": "",
-    "Title": "",
+    "Date":        start_date,
+    "Start":       "09:00",
+    "End":         "09:30",
+    "Location":    "",
+    "Title":       "",
     "Description": "",
-    "C1 Name": "", "C1 Email": "",
-    "C2 Name": "", "C2 Email": ""
+    "C1 Name":     "", "C1 Email": "",
+    "C2 Name":     "", "C2 Email": ""
 }
-
 if "manual_rdvs" not in st.session_state:
     st.session_state.manual_rdvs = pd.DataFrame([default_row])
 
 edited_df = st.data_editor(
     st.session_state.manual_rdvs,
-    use_container_width=True,
     num_rows="dynamic",
-    key="editor"
+    use_container_width=True,
+    hide_index=True,
+    key="editor",
 )
-
 if st.button("💾 Save changes"):
     st.session_state.manual_rdvs = edited_df.copy()
     st.success("Changes saved!")
 
-# 5. Generate schedule
-st.subheader("5. Generate Schedule")
-
+# ────────────────────────────────────────────────────────────────
+# 4. Generate schedule
+# ────────────────────────────────────────────────────────────────
 if st.button("📅 Generate Schedule"):
 
+    # store latest edits even if Save not clicked
+    st.session_state.manual_rdvs = edited_df.copy()
+
+    # basic required fields
     if not all([newcomer_name, newcomer_email, mgr1_name, mgr1_email]):
         st.warning("Please fill newcomer & Manager‑1 info.")
         st.stop()
-
-    # overwrite in case Save not pressed
-    st.session_state.manual_rdvs = edited_df.copy()
 
     # clean manual table
     manual_clean = st.session_state.manual_rdvs.dropna(how="all")
     manual_clean = manual_clean[
         (manual_clean["Start"].str.strip() != "") |
-        (manual_clean["End"].str.strip() != "") |
+        (manual_clean["End"].str.strip()   != "") |
         (manual_clean["Title"].str.strip() != "")
     ]
 
-    # check required fields
+    # validate required fields
     bad_rows = manual_clean[
         manual_clean["Date"].isna() |
         (manual_clean["Start"].str.strip() == "") |
-        (manual_clean["End"].str.strip() == "") |
+        (manual_clean["End"].str.strip()   == "") |
         (manual_clean["Title"].str.strip() == "")
     ]
     if not bad_rows.empty:
-        st.warning("Each manual RDV must have Date, Start, End and Title.")
+        st.warning("Every manual RDV row needs Date, Start, End and Title.")
         st.stop()
-
-    # debug
-    st.write("✅ Manual rows after cleaning:", manual_clean)
 
     # build schedule
     try:
@@ -113,12 +136,12 @@ if st.button("📅 Generate Schedule"):
         st.stop()
 
     if final_df.empty:
-        st.error("❌ No RDVs were generated. Check the role or time overlap.")
+        st.error("No RDVs generated — check template or time overlaps.")
         st.stop()
 
-    # success
     st.success("✅ Final schedule created!")
     st.dataframe(final_df, use_container_width=True)
+
     csv = final_df.to_csv(index=False).encode("utf-8-sig")
-    filename = f"{newcomer_name.replace(' ', '_')}_schedule.csv"
-    st.download_button("⬇️ Download CSV", csv, file_name=filename, mime="text/csv")
+    fname = f"{newcomer_name.replace(' ', '_')}_schedule.csv"
+    st.download_button("⬇️ Download CSV", csv, file_name=fname, mime="text/csv")
