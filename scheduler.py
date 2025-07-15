@@ -148,3 +148,72 @@ def make_row(
         "Status": "Planned",
         "Hired Date": day_date.isoformat()
     }
+# ────────────────────────────────────────────────────────────────
+#  MANUAL RDV MERGE  (priority rows)                             │
+# ────────────────────────────────────────────────────────────────
+def merge_manual_rdvs(auto_df: pd.DataFrame,
+                      manual_df: pd.DataFrame,
+                      newcomer_name: str,
+                      newcomer_email: str,
+                      mgr1_name: str, mgr1_email: str,
+                      mgr2_name: str, mgr2_email: str) -> pd.DataFrame:
+    """
+    Convert manual_df rows to the 20‑column format and prepend them
+    to auto_df, removing any auto‑generated rows that overlap.
+    """
+
+    def parse_dt(d, tstr):
+        hh, mm = map(int, tstr.split(":"))
+        return datetime.combine(pd.to_datetime(d).date(), time(hh, mm))
+
+    manual_rows = []
+    for _, row in manual_df.iterrows():
+        start_dt = parse_dt(row["Date"], row["Start"])
+        end_dt   = parse_dt(row["Date"], row["End"])
+
+        manual_rows.append({
+            "Newcomer Email": newcomer_email,
+            "Newcomer Name":  newcomer_name,
+            "Role Group":     auto_df["Role Group"].iloc[0] if not auto_df.empty else "",
+            "RDV Title":      row["Title"],
+            "RDV Description": row["Description"],
+            "Contact Person1 Email": row["C1 Email"],
+            "Contact Person1 Name":  row["C1 Name"],
+            "Contact Person2 Email": row["C2 Email"],
+            "Contact Person2 Name":  row["C2 Name"],
+            "RDV Date":  start_dt.date().isoformat(),
+            "Start Time": start_dt.strftime("%H:%M"),
+            "End Time":   end_dt.strftime("%H:%M"),
+            "Duration":   int((end_dt - start_dt).seconds // 60),
+            "Location":   "",
+            "Manager1 Email": mgr1_email,
+            "Manager1 Name":  mgr1_name,
+            "Manager2 Email": mgr2_email,
+            "Manager2 Name":  mgr2_name,
+            "Status": "Planned (manual)",
+            "Hired Date": start_dt.date().isoformat()
+        })
+
+    manual_df_clean = pd.DataFrame(manual_rows)
+
+    # ── remove auto rows that clash with manual ones
+    def overlaps(a_row):
+        a_start = datetime.strptime(f"{a_row['RDV Date']} {a_row['Start Time']}",
+                                    "%Y-%m-%d %H:%M")
+        a_end   = datetime.strptime(f"{a_row['RDV Date']} {a_row['End Time']}",
+                                    "%Y-%m-%d %H:%M")
+        for _, m in manual_df_clean.iterrows():
+            m_start = datetime.strptime(f"{m['RDV Date']} {m['Start Time']}",
+                                        "%Y-%m-%d %H:%M")
+            m_end   = datetime.strptime(f"{m['RDV Date']} {m['End Time']}",
+                                        "%Y-%m-%d %H:%M")
+            if a_row['RDV Date'] == m['RDV Date'] and not (a_end <= m_start or a_start >= m_end):
+                return True
+        return False
+
+    auto_df_non_overlap = auto_df[~auto_df.apply(overlaps, axis=1)]
+
+    # final ordered df: manual first (priority) + remaining auto
+    final_df = pd.concat([manual_df_clean, auto_df_non_overlap], ignore_index=True)
+    final_df = final_df.sort_values(["RDV Date", "Start Time"]).reset_index(drop=True)
+    return final_df
