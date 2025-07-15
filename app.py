@@ -40,23 +40,24 @@ if xlsx_file:
     mgr2_email = st.text_input("Manager 2 Email", disabled=not add_mgr2)
 
     # ── manager‑proposed RDVs table  ───────────────────────────
-    st.subheader("Manager Changes (priority RDVs)")
+st.subheader("Manager Changes (priority RDVs)")
 
-    DEFAULT_ROW = {
-        "Date":        start_date,
-        "Start":       "09:00",
-        "End":         "09:30",
-        "Title":       "",
-        "Description": "",
-        "C1 Name":     "",
-        "C1 Email":    "",
-        "C2 Name":     "",
-        "C2 Email":    ""
-    }
+DEFAULT_ROW = {
+    "Date":        start_date,
+    "Start":       "09:00",
+    "End":         "09:30",
+    "Title":       "",
+    "Description": "",
+    "C1 Name":     "",
+    "C1 Email":    "",
+    "C2 Name":     "",
+    "C2 Email":    ""
+}
 
-    if "manual_rdvs" not in st.session_state:
-        st.session_state.manual_rdvs = pd.DataFrame([DEFAULT_ROW])
+if "manual_rdvs" not in st.session_state:
+    st.session_state.manual_rdvs = pd.DataFrame([DEFAULT_ROW])
 
+with st.form(key="manual_form", clear_on_submit=False):
     edited_df = st.data_editor(
         st.session_state.manual_rdvs,
         num_rows="dynamic",
@@ -64,7 +65,12 @@ if xlsx_file:
         hide_index=True,
         key="manual_editor",
     )
+    submitted = st.form_submit_button("💾 Save changes")
+
+if submitted:
     st.session_state.manual_rdvs = edited_df
+    st.success("Changes saved!")
+
 
     # ── generate schedule button ───────────────────────────────
     if st.button("📅 Generate Schedule"):
